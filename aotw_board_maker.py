@@ -3,6 +3,9 @@ AOTW module
 Made by AlexCA
 """
 
+import csv
+import os
+
 if __name__ == "__main__":
 	print("Do not run this as a standalone script. Call main.py instead.")
 	exit(1)
@@ -47,6 +50,12 @@ class AOTW():
 			self.PRESET = args[0]
 
 		#TODO if PRESET == 0, load from file instead
+		if self.PRESET == 0:
+			self.INSEQUENCE = ["time"] # Default to time, but we'll override in board() 
+			self.scoreTypeAotw = ["time", "aotw", "cotw", "uotw", "sotw"]
+			self.scoreTypeHotw = ["heat", "fear", "hotw", "ufotw", "sfotw"]
+			# Set up for CSV loading in main or board wrapper
+		
 		if self.PRESET == 1:
 			self.INSEQUENCE: list[str] = ["time", "heat", "time", "time"] # will generate multiple boards in a row with these as the scores
 			self.scoreTypeAotw: list[str] = ["time", "aotw", "cotw", "uotw", "sotw"]
@@ -76,6 +85,32 @@ class AOTW():
 			self.board()
 			return
 
+
+		if self.PRESET == 0:
+			print("CSV Mode Selected.")
+			filename = input("Enter CSV filename (default: input.csv): ") or "input.csv"
+			if os.path.exists(filename):
+				with open(filename, newline='', encoding='utf-8') as csvfile:
+					reader = csv.reader(csvfile)
+					data = list(reader)
+					# Assume first row could be header, simple heuristic or skip
+					# For simplicity, we assume data starts immediately or user handles it. 
+					# But to be user friendly, let's process it.
+					# Expected format: Player, Score, Annotation
+					processed_data = []
+					for row in data:
+						if len(row) >= 2:
+							p = row[0].strip()
+							s = row[1].strip()
+							a = row[2].strip() if len(row) > 2 else ""
+							processed_data.append([p, s, a])
+					
+					self.board(data=processed_data)
+			else:
+				print(f"File {filename} not found. Switching to manual input.")
+				self.board()
+			return
+
 		for i, s in enumerate(self.INSEQUENCE):
 			print("\n")
 			print(f"Generating board {i + 1} with score type '{s}'")
@@ -101,13 +136,13 @@ class AOTW():
 			tags_m1: str = f"{weeknumber}, #".join(self.tags[:-1])
 			print(f"{self.discord_format}\n## {self.conclusion} #{tags_m1} and #{self.tags[-1]}! :Dusa:{self.discord_format}")
 
-	def board(self, s: str = "") -> None:
+	def board(self, s: str = "", data: list = None) -> None:
 		"""
 		displays the board. s is the score type, if empty, will prompt for a score type
 		"""
 		# get board details
 		if not s:
-			scoreType = input("scoreType: ") or "time"
+			scoreType = input("scoreType (default: time): ") or "time"
 		else:
 			scoreType = s
 		scoreType = scoreType[0].upper() + scoreType[1:] # first letter will always be a capital letter
@@ -116,28 +151,42 @@ class AOTW():
 		self.annotationSpace = 0
 		players = []
 
-		while 1:
-			print() # blank line between each player
-			
-			player = input("Player: ")
-			if not player:
-				break
-			
-			score = input(f"{scoreType}: ")
-			while not score:
-				score = input(f"Please enter a {scoreType} for this player: ")
-			
-			annotation = input("Annotation (optional): ")
-			annotation = ' ' + annotation
-			if len(annotation) > self.annotationSpace:
-				self.annotationSpace = len(annotation)
-			players.append([player, score, annotation])
-			
-			self.widthplayers = max(self.widthplayers, len(player) + 2)
-			self.widthscores = max(self.widthscores, len(score) + len(annotation) + 2)
+		if data:
+			for row in data:
+				player = row[0]
+				score = row[1]
+				annotation = ' ' + row[2] if len(row) > 2 else ' '
+				
+				if len(annotation) > self.annotationSpace:
+					self.annotationSpace = len(annotation)
+				
+				players.append([player, score, annotation])
+				self.widthplayers = max(self.widthplayers, len(player) + 2)
+				self.widthscores = max(self.widthscores, len(score) + len(annotation) + 2)
 
-			if self.DEBUG:
-				print("DEBUG:", players[-1])
+		else:
+			while 1:
+				print() # blank line between each player
+				
+				player = input("Player: ")
+				if not player:
+					break
+				
+				score = input(f"{scoreType}: ")
+				while not score:
+					score = input(f"Please enter a {scoreType} for this player: ")
+				
+				annotation = input("Annotation (optional): ")
+				annotation = ' ' + annotation
+				if len(annotation) > self.annotationSpace:
+					self.annotationSpace = len(annotation)
+				players.append([player, score, annotation])
+				
+				self.widthplayers = max(self.widthplayers, len(player) + 2)
+				self.widthscores = max(self.widthscores, len(score) + len(annotation) + 2)
+				
+				if self.DEBUG:
+					print("DEBUG:", players[-1])
 
 		"""sort board"""
 		if len(players) > 1:
@@ -216,25 +265,35 @@ class AOTW():
 		"""
 		if not score:
 			return (0, [])
+		indices_to_remove = []
 		notes = []
 		for i in range(len(score)):
-			if score[i] >= '0' and score[i] <= '9': pass
+			if '0' <= score[i] <= '9': pass
 			elif score[i] == ':': pass
-			else: notes[i].append(score[i])
-		# remove notes from the time string
-		for i in notes:
+			else: 
+				indices_to_remove.append(i)
+				notes.append(score[i])
+		# remove notes from the time string (reverse order to maintain indices)
+		for i in reversed(indices_to_remove):
 			score = score[:i] + score[i+1:]
 		
+		# If score is empty after stripping (e.g. "ww"), return 0
+		if not score:
+			return (0, notes)
+
 		total: int = 0
 		time: list[str] = score.split(':')
-		time_l: list = [int(i) for i in time]
-		total += time_l.pop()
-		if time_l:
-			total += time_l.pop() * 60 # seconds -> minutes
-		if time_l:
-			total += time_l.pop() * 60 * 60 # minutes -> hours
-		if time_l:
-			total += time_l.pop() * 60 * 60 * 24 # hours -> days
+		try:
+			time_l: list = [int(i) for i in time]
+			total += time_l.pop()
+			if time_l:
+				total += time_l.pop() * 60 # seconds -> minutes
+			if time_l:
+				total += time_l.pop() * 60 * 60 # minutes -> hours
+			if time_l:
+				total += time_l.pop() * 60 * 60 * 24 # hours -> days
+		except ValueError:
+			return (0, notes)
 		return (total, notes)
 
 	def numberToFloat(self, score: str) -> tuple[int, list]:
@@ -243,15 +302,24 @@ class AOTW():
 		"""
 		if not score:
 			return (0, [])
-		notes: list = []
+		indices_to_remove = []
+		notes = []
 		for i in range(len(score)):
-			if score[i] >= '0' and score[i] <= '9': pass
-			else: notes.append(score[i])
+			if '0' <= score[i] <= '9': pass
+			else: 
+				indices_to_remove.append(i)
+				notes.append(score[i])
 		# remove notes from the number string
-		for i in notes:
+		for i in reversed(indices_to_remove):
 			score = score[:i] + score[i+1:]
 		
-		return (int(score), notes)
+		if not score:
+			return (0, notes)
+
+		try:
+			return (int(score), notes)
+		except ValueError:
+			return (0, notes)
 
 	def compareTime(self, player1: list[str], player2: list[str]) -> list[list]:
 		"""
