@@ -3,12 +3,13 @@ AOTW module
 Made by AlexCA
 """
 
-import csv
-import os
+from csv import reader
+from os import path
+import sys
 
 if __name__ == "__main__":
 	print("Do not run this as a standalone script. Call main.py instead.")
-	exit(1)
+	sys.exit(1)
 
 class AOTW():
 	def help(self) -> None:
@@ -28,7 +29,9 @@ class AOTW():
 		self.writeupTable: list[str] = []
 		self.widthplayers: int = -1
 		self.widthscores: int = -1
+		self.widthscores: int = -1
 		self.annotationSpace: int = -1
+		self.board_data: list[list[str]] = []
 
 	def main(self) -> None:
 		"""
@@ -41,7 +44,7 @@ class AOTW():
 	def set_preset(self, PRESET: int = 0) -> None:
 		self.PRESET = PRESET
 
-	def presets(self, *args) -> None:
+	def presets(self, *args: int) -> None:
 		"""
 		these are example-presets. modify this part at will.
 		"""
@@ -51,10 +54,18 @@ class AOTW():
 
 		#TODO if PRESET == 0, load from file instead
 		if self.PRESET == 0:
-			self.INSEQUENCE = ["time"] # Default to time, but we'll override in board() 
-			self.scoreTypeAotw = ["time", "aotw", "cotw", "uotw", "sotw"]
-			self.scoreTypeHotw = ["heat", "fear", "hotw", "ufotw", "sfotw"]
-			# Set up for CSV loading in main or board wrapper
+			print("CSV Mode Selected.")
+			filename: str = input("Enter CSV filename (default: input.csv): ") or "input.csv"
+			preset_data: dict = self.loadpreset(filename)
+			
+			if preset_data:
+				self.INSEQUENCE = preset_data.get("INSEQUENCE", ["time"])
+				self.board_data = preset_data.get("board_data", [])
+			else:
+				# Fallback if load fails or file not found
+				print(f"File {filename} not found or invalid. Switching to manual input.")
+				self.INSEQUENCE = ["time"]
+				self.board_data = []
 		
 		if self.PRESET == 1:
 			self.INSEQUENCE: list[str] = ["time", "heat", "time", "time"] # will generate multiple boards in a row with these as the scores
@@ -77,6 +88,33 @@ class AOTW():
 			self.conclusion: str = "Good luck and have fun! To participate, tag your victory screens with"
 			self.tags: list[str] = ["aotw", "hotw", "cotw", "motw"]
 
+	def loadpreset(self, filename: str) -> dict[str, list]:
+		"""
+		Reads configuration/data from a file.
+		Returns a dictionary where keys are field names.
+		"""
+		if path.exists(filename):
+			try:
+				with open(filename, newline='', encoding='utf-8') as csvfile:
+					csv_reader = reader(csvfile)
+					data = list(csv_reader)
+					processed_data: list[list[str]] = []
+					for row in data:
+						if len(row) >= 2:
+							p: str = row[0].strip()
+							s: str = row[1].strip()
+							a: str = row[2].strip() if len(row) > 2 else ""
+							processed_data.append([p, s, a])
+					
+					return {
+						"INSEQUENCE": ["time"], # Default for CSV
+						"board_data": processed_data
+					}
+			except Exception as e:
+				print(f"Error reading {filename}: {e}")
+				return {}
+		return {}
+
 	def board_wrapper(self) -> None:
 		"""
 		generate boards
@@ -87,27 +125,11 @@ class AOTW():
 
 
 		if self.PRESET == 0:
-			print("CSV Mode Selected.")
-			filename = input("Enter CSV filename (default: input.csv): ") or "input.csv"
-			if os.path.exists(filename):
-				with open(filename, newline='', encoding='utf-8') as csvfile:
-					reader = csv.reader(csvfile)
-					data = list(reader)
-					# Assume first row could be header, simple heuristic or skip
-					# For simplicity, we assume data starts immediately or user handles it. 
-					# But to be user friendly, let's process it.
-					# Expected format: Player, Score, Annotation
-					processed_data = []
-					for row in data:
-						if len(row) >= 2:
-							p = row[0].strip()
-							s = row[1].strip()
-							a = row[2].strip() if len(row) > 2 else ""
-							processed_data.append([p, s, a])
-					
-					self.board(data=processed_data)
+			# Data is already loaded in presets()
+			if self.board_data:
+				self.board(data=self.board_data)
 			else:
-				print(f"File {filename} not found. Switching to manual input.")
+				# Manual fallback if board_data is empty
 				self.board()
 			return
 
@@ -136,7 +158,7 @@ class AOTW():
 			tags_m1: str = f"{weeknumber}, #".join(self.tags[:-1])
 			print(f"{self.discord_format}\n## {self.conclusion} #{tags_m1} and #{self.tags[-1]}! :Dusa:{self.discord_format}")
 
-	def board(self, s: str = "", data: list = None) -> None:
+	def board(self, s: str = "", data: list[list[str]] | None = None) -> None:
 		"""
 		displays the board. s is the score type, if empty, will prompt for a score type
 		"""
